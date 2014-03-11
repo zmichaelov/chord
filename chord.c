@@ -30,20 +30,52 @@ void handle_join(char* address, int port, int hash) {
         strcat(request, temp);
         n += sprintf(temp, "|prev:%s:%d:%u", prev.address , prev.port, prev.hash);
         strcat(request, temp);
-        n += sprintf(temp, "|next2:%s:%d:%u",next.address , next.port, next.hash);
+        // updates for prev2 and next2
+        if (next2.hash != me.hash) {
+            n += sprintf(temp, "|next2:%s:%d:%u",next.address , next.port, next.hash);
+            strcat(request, temp);
+        }// else leave as is, joining nodes' next2 will remain itself
+       // else {
+       //     n += sprintf(temp, "|next2:%s:%d:%u",next.address , next.port, next.hash);
+       // }
+
+        if (prev2.hash != me.hash) {
+            n += sprintf(temp, "|prev2:%s:%d:%u\r\n",prev2.address , prev2.port, prev2.hash);
+        } else {// leave prev2 as is
+            n += sprintf(temp, "\r\n");
+        }
         strcat(request, temp);
-        n += sprintf(temp, "|prev2:%s:%d:%u\r\n",prev2.address , prev2.port, prev2.hash);
-        strcat(request, temp);
-        //printf("request: %s", request);
-        Rio_writep(fd, request, n);
+        Rio_writep(fd, request, n);// send update request to joining node
+        Close(fd);
+        // update prev2 and next2
+//        fd = Open_clientfd(prev2.address, prev2.port);// open connection to ring
+//        n = sprintf(request, "UPDATE|next2:%s:%d:%u\r\n",address , port, hash);
+//        Rio_writep(fd, request, n);// send update request to joining node
+//        Close(fd);
+//
+//        fd = Open_clientfd(next2.address, next2.port);// open connection to ring
+//        n = sprintf(request, "UPDATE|prev2:%s:%d:%u\r\n",address , port, hash);
+//        Rio_writep(fd, request, n);// send update request to joining node
+//        Close(fd);
+        // update pointers for our predecessor
+        fd = Open_clientfd(prev.address, prev.port);// open connection to ring
+        n = sprintf(request, "UPDATE|next:%s:%d:%u\r\n",address , port, hash);
+        Rio_writep(fd, request, n);// send update request to joining node
+        Close(fd);
+        // update our pointers
+        prev.address = address;
+        prev.port = port;
+        prev.hash = hash;
+
     } else {
         // forward join request to our successor
         int nextfd = Open_clientfd(next.address, next.port);// open connection to ring
         // send bytes request to join
-        char request[MAXBUF];
+        char request[1024];
         // give the ring our ip address, port, and hash
         size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", address, port, hash);
         Rio_writep(nextfd, request, n);
+        Close(nextfd);
     }
 }
 
@@ -75,20 +107,18 @@ void process_update (char* request){
 int handle_connection(int connfd) {
 
     char* request = read_request(connfd);
-    printf("original request: %s\n", request);
+    printf("request: %s\n", request);
     char* saveptr;
     char* cmd = strtok_r(request, "|", &saveptr);
-    printf("command: %s\n", cmd);
     if(!strcmp(cmd, "JOIN")) {// a new node wants to join the ring
         char* ip = strtok_r(NULL, ":", &saveptr);
         int port = atoi(strtok_r(NULL, "|", &saveptr));
         int hash = atoi(strtok_r(NULL, "|", &saveptr));
-        printf("address, port, hash: %s:%d|%u\n", ip, port, hash);
         handle_join(ip, port, hash);
     } else if (!strcmp(cmd, "UPDATE")) {
         char* ptr = cmd;
         char* req = Malloc(sizeof(char)*256);
-        while (ptr != NULL) {// parse out individual update requests
+        while (1) {// parse out individual update requests
             ptr = strtok_r(NULL, "|", &saveptr);// strip out one update request
             if (ptr == NULL){
                 break;
@@ -114,7 +144,7 @@ void join_chord_ring(char* ip, int port){
 
     int joinfd = Open_clientfd(ip, port);// open connection to ring
     // send bytes request to join
-    char request[8192];
+    char request[1024];
     // give the ring our ip address, port, and hash
     printf("myhash: %u\n", me.hash);
     size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", me.address, me.port, me.hash);
@@ -162,25 +192,26 @@ int main(int argc, char *argv[]) {
     me.address = listen_address;
     me.port = listen_port;
     me.hash = newhash;
-    //strcpy(me.hash,myhash);
+    prev2 = me;
+    prev = me;
+    next = me;
+    next2 = me;
 
     if (argc == 5) {// join an existing ring
         char* join_ip = argv[3];
         int join_port = atoi(argv[4]);
         join_chord_ring(join_ip, join_port);
-    } else {// starting new ring
-        prev2 = me;
-        prev = me;
-        next = me;
-        next2 = me;
+    } else {
     }
+
     int connfd;
     struct sockaddr_in clientaddr;
     struct hostent *hp;
     char *haddrp ;
     while(1) {// listen for chord messages
-        printf("Listening for chord messages on port: %d\n", listen_port);
-
+        //printf("Listening for chord messages on port: %d\n", listen_port);
+        printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n\n", prev2.hash,
+                prev.hash, me.hash, next.hash, next2.hash);
         int clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
         if (connfd <= 2) {
