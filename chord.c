@@ -17,8 +17,9 @@ char * read_request(int connfd) {
     return request;
 }
 
-void handle_join(char* address, int port, int hash) {
-    if(hash < me.hash) {// found correct position in ring
+void handle_join(char* address, int port,unsigned int hash) {
+    if( (me.hash == next.hash) || (hash < me.hash && prev.hash < hash) ||
+        (hash < me.hash && prev.hash > me.hash)) {// found correct position in ring
         // send necessary pointers to
         int fd = Open_clientfd(address, port);// open connection to ring
         // send bytes request to join
@@ -47,12 +48,14 @@ void handle_join(char* address, int port, int hash) {
         strcat(request, temp);
         Rio_writep(fd, request, n);// send update request to joining node
         Close(fd);
-        // update prev2 and next2
-//        fd = Open_clientfd(prev2.address, prev2.port);// open connection to ring
-//        n = sprintf(request, "UPDATE|next2:%s:%d:%u\r\n",address , port, hash);
-//        Rio_writep(fd, request, n);// send update request to joining node
-//        Close(fd);
-//
+        // tell our prev2 to update it's next2 pointer
+        if (prev2.hash != me.hash) {
+            fd = Open_clientfd(prev2.address, prev2.port);// open connection to ring
+            n = sprintf(request, "UPDATE|next2:%s:%d:%u\r\n",address , port, hash);
+            Rio_writep(fd, request, n);// send update request to joining node
+            Close(fd);
+        }
+        // tell our next2 to update it's prev2 pointer
 //        fd = Open_clientfd(next2.address, next2.port);// open connection to ring
 //        n = sprintf(request, "UPDATE|prev2:%s:%d:%u\r\n",address , port, hash);
 //        Rio_writep(fd, request, n);// send update request to joining node
