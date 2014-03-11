@@ -63,12 +63,14 @@ void handle_join(char* address, int port, int hash) {
         Rio_writep(fd, request, n);// send update request to joining node
         Close(fd);
         // update our pointers
-        prev.address = address;
+        //prev.address = address;
+        strcpy(prev.address, address);
         prev.port = port;
         prev.hash = hash;
 
     } else {
         // forward join request to our successor
+        printf("Forwarding Request to %s:%d\n", next.address, next.port);
         int nextfd = Open_clientfd(next.address, next.port);// open connection to ring
         // send bytes request to join
         char request[1024];
@@ -83,22 +85,31 @@ void process_update (char* request){
     char* save;
     char* name = strtok_r(request, ":", &save);
     char* ip = strtok_r(NULL, ":", &save);
+    //char* ip = Malloc(strlen(temp));
+    //strcpy(ip, temp);
     int port = atoi(strtok_r(NULL, ":", &save));
     int hash = atoi(strtok_r(NULL, ":", &save));
+    printf("name: %s\n", name);
     if(!strcmp(name, "prev2")) {
-        prev2.address = ip;
+        strcpy(prev2.address, ip);
+        //prev2.address = ip;
         prev2.port = port;
         prev2.hash= hash;
     } else if(!strcmp(name, "prev")){
-        prev.address = ip;
+        strcpy(prev.address, ip);
+        //prev.address = ip;
         prev.port = port;
         prev.hash= hash;
     } else if(!strcmp(name, "next")){
-        next.address = ip;
+        printf("Next match\n");
+        strcpy(next.address, ip);
+        //next.address = ip;
         next.port = port;
         next.hash= hash;
     } else if(!strcmp(name, "next2")){
-        next2.address = ip;
+        printf("Next2 match\n");
+        strcpy(next2.address, ip);
+        //next2.address = ip;
         next2.port = port;
         next2.hash= hash;
     }
@@ -176,7 +187,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    char* listen_address= argv[1];
+    char* listen_address = argv[1];
     int listen_port = atoi(argv[2]); // listen for chord connections on this port
     // generate our hash
     size_t n = sprintf(ip_and_port, "%s%d", listen_address, listen_port);
@@ -189,7 +200,8 @@ int main(int argc, char *argv[]) {
     int optval = 1;
     setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, sizeof(int));
 
-    me.address = listen_address;
+    //me.address = listen_address;
+    strcpy(me.address, listen_address);
     me.port = listen_port;
     me.hash = newhash;
     prev2 = me;
