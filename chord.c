@@ -92,24 +92,20 @@ void process_update (char* request){
     printf("name: %s\n", name);
     if(!strcmp(name, "prev2")) {
         strcpy(prev2.address, ip);
-        //prev2.address = ip;
         prev2.port = port;
         prev2.hash= hash;
     } else if(!strcmp(name, "prev")){
         strcpy(prev.address, ip);
-        //prev.address = ip;
         prev.port = port;
         prev.hash= hash;
     } else if(!strcmp(name, "next")){
         printf("Next match\n");
         strcpy(next.address, ip);
-        //next.address = ip;
         next.port = port;
         next.hash= hash;
     } else if(!strcmp(name, "next2")){
         printf("Next2 match\n");
         strcpy(next2.address, ip);
-        //next2.address = ip;
         next2.port = port;
         next2.hash= hash;
     }
@@ -157,9 +153,7 @@ void join_chord_ring(char* ip, int port){
     // send bytes request to join
     char request[1024];
     // give the ring our ip address, port, and hash
-    printf("myhash: %u\n", me.hash);
     size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", me.address, me.port, me.hash);
-    printf("myrequest: %s\n", request);
     Rio_writep(joinfd, request, n);
 }
 
@@ -194,7 +188,6 @@ int main(int argc, char *argv[]) {
     unsigned char myhash[SHA_DIGEST_LENGTH];
     SHA1(ip_and_port, n, myhash);
     unsigned int newhash = hash_to_int(&myhash);
-    printf("My hash position is: %u\n", newhash);
     // listen for connections
     int listenfd = Open_listenfd(listen_port);
     int optval = 1;
