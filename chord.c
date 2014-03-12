@@ -74,7 +74,30 @@ void handle_join(char* address, int port,unsigned int hash) {
             next2.hash = hash;
         // Case 3: joining a 3-node ring
         } else if (next.hash == prev2.hash){
+            n += sprintf(temp, "|next2:%s:%d:%u", next.address , next.port, next.hash);
+            strcat(request, temp);
+            n += sprintf(temp, "|prev2:%s:%d:%u\r\n", prev2.address , prev2.port, prev2.hash);
+            strcat(request, temp);
 
+            // tell our next to update its pointers
+            int nextfd = Open_clientfd(next.address, next.port);
+            int n2 = sprintf(temp, "UPDATE|prev2:%s:%d:%u", address , port, hash);
+            strcat(update, temp);
+            n2 += sprintf(temp, "|next2:%s:%d:%u\r\n", address , port, hash);
+            strcat(update, temp);
+            Rio_writep(nextfd, update, n2);
+            Close(nextfd);
+
+            // tell our next2 to update its pointers
+            int next2fd = Open_clientfd(next2.address, next2.port);
+            memset(update, 0, 128);
+            n2 = 0;
+            n2 += sprintf(temp, "UPDATE|next:%s:%d:%u", address , port, hash);
+            strcat(update, temp);
+            n2 += sprintf(temp, "|next2:%s:%d:%u\r\n", me.address , me.port, me.hash);
+            strcat(update, temp);
+            Rio_writep(next2fd, update, n2);
+            Close(next2fd);
         // Case 4: joining a 4-node ring
         } else if (prev2.hash == next2.hash) {
 
