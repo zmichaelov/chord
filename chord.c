@@ -16,6 +16,11 @@ char * read_request(int connfd) {
     Rio_readlineb(&client, request, MAXBUF);
     return request;
 }
+// tell the chord node defined my old to update
+void send_update(chord_node old, chord_node new){
+
+}
+
 
 void handle_join(char* address, int port,unsigned int hash) {
     if( (me.hash == next.hash) || (hash < me.hash && prev.hash < hash) ||
@@ -23,60 +28,88 @@ void handle_join(char* address, int port,unsigned int hash) {
         // send necessary pointers to
         int fd = Open_clientfd(address, port);// open connection to ring
         // send bytes request to join
-        char request[MAXBUF];
-        char temp[1024];
+        char request[MAXBUF] = "";
+        char temp[128] = "";
+        char update[128] = "";
+        printf("Initial request buffer: %s\n", request);
         // give the ring our ip address, port, and hash
         size_t n = 0;
         n += sprintf(temp, "UPDATE|next:%s:%d:%u",me.address , me.port, me.hash);
         strcat(request, temp);
         n += sprintf(temp, "|prev:%s:%d:%u", prev.address , prev.port, prev.hash);
         strcat(request, temp);
-        // updates for prev2 and next2
-        if (next2.hash != me.hash) {
-            n += sprintf(temp, "|next2:%s:%d:%u",next.address , next.port, next.hash);
+        // the next2 and prev2 pointers have special cases for updating
+        // Case 1: joining a 1-node ring
+        if (prev2.hash == prev.hash) {
+            // do nothing
+            // next2 and prev2 pointers don't change, or should be set to themselves
+        // Case 2: joining a 2-node ring
+        } else if (prev.hash == next.hash){
+            // new node's next2 should point to our next
+            printf("Joining 2-node ring!\n");
+            n += sprintf(temp, "|next2:%s:%d:%u", next.address , next.port, next.hash);
             strcat(request, temp);
-        }// else leave as is, joining nodes' next2 will remain itself
-       // else {
-       //     n += sprintf(temp, "|next2:%s:%d:%u",next.address , next.port, next.hash);
-       // }
+            // new node's prev2 should point to us
+            n += sprintf(temp, "|prev2:%s:%d:%u\r\n", me.address , me.port, me.hash);
+            strcat(request, temp);
 
-        if (prev2.hash != me.hash) {
-            n += sprintf(temp, "|prev2:%s:%d:%u\r\n",prev2.address , prev2.port, prev2.hash);
-        } else {// leave prev2 as is
-            n += sprintf(temp, "\r\n");
+            // tell our next to update its pointers
+            int nextfd = Open_clientfd(next.address, next.port);
+            int n2 = sprintf(temp, "UPDATE|prev2:%s:%d:%u", address , port, hash);
+            strcat(update, temp);
+            n2 += sprintf(temp, "|next2:%s:%d:%u\r\n", me.address , me.port, me.hash);
+            strcat(update, temp);
+            Rio_writep(nextfd, update, n2);
+            Close(nextfd);
+
+            // tell our prev2 to update its pointers
+            int prev2fd = Open_clientfd(prev2.address, prev2.port);
+            n2 = sprintf(update, "UPDATE|next2:%s:%d:%u\r\n", address , port, hash);
+            Rio_writep(prev2fd, update, n2);
+            Close(prev2fd);
+
+            // our next2 points to the new node
+            strcpy(next2.address, address);
+            next2.port = port;
+            next2.hash = hash;
+        // Case 3: joining a 3-node ring
+        } else if (next.hash == prev2.hash){
+
+        // Case 4: joining a 4-node ring
+        } else if (prev2.hash == next2.hash) {
+
+        } else {
+
         }
-        strcat(request, temp);
+        // Case 5: five or more ring
+        printf("Update to send to new node: %s\n", request);
         Rio_writep(fd, request, n);// send update request to joining node
         Close(fd);
-        // tell our prev2 to update it's next2 pointer
-        if (prev2.hash != me.hash) {
-            fd = Open_clientfd(prev2.address, prev2.port);// open connection to ring
-            n = sprintf(request, "UPDATE|next2:%s:%d:%u\r\n",address , port, hash);
-            Rio_writep(fd, request, n);// send update request to joining node
-            Close(fd);
-        }
-        // tell our next2 to update it's prev2 pointer
-//        fd = Open_clientfd(next2.address, next2.port);// open connection to ring
-//        n = sprintf(request, "UPDATE|prev2:%s:%d:%u\r\n",address , port, hash);
-//        Rio_writep(fd, request, n);// send update request to joining node
-//        Close(fd);
-        // update pointers for our predecessor
+
+        // tell predecessor to update its next pointer
         fd = Open_clientfd(prev.address, prev.port);// open connection to ring
         n = sprintf(request, "UPDATE|next:%s:%d:%u\r\n",address , port, hash);
         Rio_writep(fd, request, n);// send update request to joining node
         Close(fd);
+
+
         // update our pointers
-        //prev.address = address;
+        // set our prev2 to our old prev
+        strcpy(prev2.address, prev.address);
+        prev2.port = prev.port;
+        prev2.hash = prev.hash;
+        // set our prev to the new guy
         strcpy(prev.address, address);
         prev.port = port;
         prev.hash = hash;
+
 
     } else {
         // forward join request to our successor
         printf("Forwarding Request to %s:%d\n", next.address, next.port);
         int nextfd = Open_clientfd(next.address, next.port);// open connection to ring
         // send bytes request to join
-        char request[1024];
+        char request[64];
         // give the ring our ip address, port, and hash
         size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", address, port, hash);
         Rio_writep(nextfd, request, n);
@@ -92,7 +125,6 @@ void process_update (char* request){
     //strcpy(ip, temp);
     int port = atoi(strtok_r(NULL, ":", &save));
     int hash = atoi(strtok_r(NULL, ":", &save));
-    printf("name: %s\n", name);
     if(!strcmp(name, "prev2")) {
         strcpy(prev2.address, ip);
         prev2.port = port;
@@ -102,12 +134,10 @@ void process_update (char* request){
         prev.port = port;
         prev.hash= hash;
     } else if(!strcmp(name, "next")){
-        printf("Next match\n");
         strcpy(next.address, ip);
         next.port = port;
         next.hash= hash;
     } else if(!strcmp(name, "next2")){
-        printf("Next2 match\n");
         strcpy(next2.address, ip);
         next2.port = port;
         next2.hash= hash;
