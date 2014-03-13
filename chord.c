@@ -3,6 +3,7 @@
 #include "csapp.h"
 #include "chord.h"
 #include <openssl/sha.h>
+#include <pthread.h>
 
 chord_node prev2;
 chord_node prev;
@@ -16,11 +17,59 @@ char * read_request(int connfd) {
     Rio_readlineb(&client, request, MAXBUF);
     return request;
 }
+
+unsigned int hash_to_int(unsigned char* b){
+    unsigned int h = 0;
+    for (int i = 0; i < 20; i += 4){
+        int x = 0;
+        x = b[i];
+        x = (x << 8) + b[i+1];
+        x = (x << 8) + b[i+2];
+        x = (x << 8) + b[i+3];
+        if (h == 0){
+            h = x;
+        } else {
+            h ^= x;
+        }
+    }
+    return h;
+}
+unsigned int get_hash(char* search) {
+    // found correct position
+    unsigned char myhash[SHA_DIGEST_LENGTH];
+    SHA1(search, strlen(search), myhash);
+    return hash_to_int(&myhash);
+}
 // tell the chord node defined my old to update
 void send_update(chord_node old, chord_node new){
 
 }
+// pass request to our next node
+void forward_request (char* request, size_t n){
+    int nextfd = Open_clientfd(next.address, next.port);
+    Rio_writep(nextfd, request, n);
+    Close(nextfd);
+}
+// determine if we are the correct bucket for this resource
+int found_correct_bucket(unsigned int resource) {
+    return (me.hash == next.hash) || // one node ring
+           (resource < me.hash && prev.hash < resource) ||// regular case
+           (resource < me.hash && prev.hash > me.hash); // edge case: we are the start of teh ring
+}
 
+void handle_search(char* search) {
+    unsigned int hash = get_hash(search);
+    printf("Hash for %s = %u\n",search, hash);
+    if (found_correct_bucket(hash)) {// found correct position in ring
+        printf("Found correct bucket for search term!\n");
+    } else {
+        char* request = Malloc(sizeof(char)*64);
+        size_t n = sprintf(request, "SEARCH|%s\r\n", search);
+        forward_request(request, n);
+        Free(request);
+        printf("Forwarding Search Request to %s:%d\n", next.address, next.port);
+    }
+}
 
 void handle_join(char* address, int port,unsigned int hash) {
     if( (me.hash == next.hash) || (hash < me.hash && prev.hash < hash) ||
@@ -31,7 +80,7 @@ void handle_join(char* address, int port,unsigned int hash) {
         char request[MAXBUF] = "";
         char temp[128] = "";
         char update[128] = "";
-        printf("Initial request buffer: %s\n", request);
+    //    printf("Initial request buffer: %s\n", request);
         // give the ring our ip address, port, and hash
         size_t n = 0;
         n += sprintf(temp, "UPDATE|next:%s:%d:%u",me.address , me.port, me.hash);
@@ -162,12 +211,18 @@ void handle_join(char* address, int port,unsigned int hash) {
     }
 }
 
+void handle_quit() {
+    // tell our prev2, prev, next, and next2 to update their pointers
+    char update[128];
+    int nextfd = Open_clientfd(next.address, next.port);
+    //int n2 = sprintf(update, "UPDATE|prev2:%s:%d:%u\r\n", address , port, hash);
+    //Rio_writep(nextfd, update, n2);
+    Close(nextfd);
+}
 void process_update (char* request){
     char* save;
     char* name = strtok_r(request, ":", &save);
     char* ip = strtok_r(NULL, ":", &save);
-    //char* ip = Malloc(strlen(temp));
-    //strcpy(ip, temp);
     int port = atoi(strtok_r(NULL, ":", &save));
     int hash = atoi(strtok_r(NULL, ":", &save));
     if(!strcmp(name, "prev2")) {
@@ -216,9 +271,10 @@ int handle_connection(int connfd) {
     } else if (!strcmp(cmd, "KEEP-ALIVE")){
 
     } else if (!strcmp(cmd, "LEAVE")){
-
+        handle_quit();
     } else if (!strcmp(cmd, "SEARCH")){
-
+        char* query = strtok_r(NULL, ":", &saveptr);
+        handle_search(query);
     }
     // free dynamic memory
     Free(request);
@@ -233,25 +289,56 @@ void join_chord_ring(char* ip, int port){
     // give the ring our ip address, port, and hash
     size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", me.address, me.port, me.hash);
     Rio_writep(joinfd, request, n);
+    Close(joinfd);
 }
 void repl () {
     char command[64] = "";// should be 'quit' or search term
-	while(1) {
+    while(1) {
         printf("chord-shell$ ");
-		if(fgets(command, 64, stdin) == NULL || !strcmp(command, "\n")) {
-			if (feof(stdin)) { /* End of file (ctrl-d) */
-				fflush(stdout);
-				printf("\n");
-				exit(EXIT_SUCCESS);
+        if(fgets(command, 64, stdin) == NULL || !strcmp(command, "\n")) {
+            if (feof(stdin)) { /* End of file (ctrl-d) */
+                fflush(stdout);
+                printf("\n");
+                exit(EXIT_SUCCESS);
             }
-			continue; /* NOOP; user entered return or spaces with return */
-		}
+            continue; /* NOOP; user entered return or spaces with return */
+        }
         int n = strcmp(command, "quit\n");
         if (!n){
+            handle_quit();
             exit(0);
         }
+        handle_search(command);
         printf("You searched for:%s", command);
     }
+}
+void* connections(void* listen_port) {
+    int listenfd = Open_listenfd(*(int*)listen_port);
+    int optval = 1;
+    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, sizeof(int));
+    // this should be done in threads
+    int connfd;
+    struct sockaddr_in clientaddr;
+//    struct hostent *hp;
+//    char *haddrp ;
+
+    while(1) {// listen for chord messages
+        printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n\n", prev2.hash,
+                prev.hash, me.hash, next.hash, next2.hash);
+        int clientlen = sizeof(clientaddr);
+        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+        if (connfd <= 2) {
+            continue;
+        }
+
+//        hp = Gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr,
+//            sizeof(clientaddr.sin_addr.s_addr), AF_INET);
+//
+//        haddrp = inet_ntoa(clientaddr.sin_addr);
+        handle_connection(connfd);// TODO use detached threads
+
+    }
+
 }
 int main(int argc, char *argv[]) {
     // parse command line options
@@ -260,7 +347,6 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    pthread_t tid;
     char* listen_address = argv[1];
     int listen_port = atoi(argv[2]); // listen for chord connections on this port
     // generate our hash
@@ -269,10 +355,6 @@ int main(int argc, char *argv[]) {
     unsigned char myhash[SHA_DIGEST_LENGTH];
     SHA1(ip_and_port, n, myhash);
     unsigned int newhash = hash_to_int(&myhash);
-    // listen for connections
-    int listenfd = Open_listenfd(listen_port);
-    int optval = 1;
-    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, sizeof(int));
 
     //me.address = listen_address;
     strcpy(me.address, listen_address);
@@ -288,30 +370,13 @@ int main(int argc, char *argv[]) {
         join_chord_ring(join_ip, join_port);
     }
 
+    pthread_t tid;
+    /* spawn a thread to process the new connection */
+    Pthread_create(&tid, NULL, connections, (void*) &listen_port);
+    Pthread_detach(tid);
+
     repl();
 
-    // this should be done in threads
-    int connfd;
-    struct sockaddr_in clientaddr;
-    struct hostent *hp;
-    char *haddrp ;
-
-    while(1) {// listen for chord messages
-        printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n\n", prev2.hash,
-                prev.hash, me.hash, next.hash, next2.hash);
-        int clientlen = sizeof(clientaddr);
-        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        if (connfd <= 2) {
-            continue;
-        }
-
-        hp = Gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr,
-            sizeof(clientaddr.sin_addr.s_addr), AF_INET);
-
-        haddrp = inet_ntoa(clientaddr.sin_addr);
-        handle_connection(connfd);// TODO use detached threads
-
-    }
 }
 
 
