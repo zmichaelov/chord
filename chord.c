@@ -98,13 +98,35 @@ void handle_join(char* address, int port,unsigned int hash) {
             strcat(update, temp);
             Rio_writep(next2fd, update, n2);
             Close(next2fd);
-        // Case 4: joining a 4-node ring
-        } else if (prev2.hash == next2.hash) {
-
+        // Case 4: joining a 4-node or more ring
         } else {
+            n += sprintf(temp, "|next2:%s:%d:%u", next.address , next.port, next.hash);
+            strcat(request, temp);
+            n += sprintf(temp, "|prev2:%s:%d:%u\r\n", prev2.address , prev2.port, prev2.hash);
+            strcat(request, temp);
 
+            // tell our next to update its pointers
+            int nextfd = Open_clientfd(next.address, next.port);
+            int n2 = sprintf(update, "UPDATE|prev2:%s:%d:%u\r\n", address , port, hash);
+            Rio_writep(nextfd, update, n2);
+            Close(nextfd);
+
+            // tell our prev to update its next2
+            int prevfd = Open_clientfd(prev.address, prev.port);
+            memset(update, 0, 128);
+            n2 = sprintf(update, "UPDATE|next2:%s:%d:%u\r\n", me.address , me.port, me.hash);
+            Rio_writep(prevfd, update, n2);
+            Close(prevfd);
+
+            // tell our prev2 to update its next2
+            int next2fd = Open_clientfd(prev2.address, prev2.port);
+            memset(update, 0, 128);
+            n2 = 0;
+            n2 += sprintf(temp, "UPDATE|next2:%s:%d:%u\r\n", address , port, hash);
+            strcat(update, temp);
+            Rio_writep(next2fd, update, n2);
+            Close(next2fd);
         }
-        // Case 5: five or more ring
         printf("Update to send to new node: %s\n", request);
         Rio_writep(fd, request, n);// send update request to joining node
         Close(fd);
