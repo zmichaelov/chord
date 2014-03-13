@@ -53,7 +53,7 @@ void handle_join(char* address, int port,unsigned int hash) {
             n += sprintf(temp, "|prev2:%s:%d:%u\r\n", me.address , me.port, me.hash);
             strcat(request, temp);
 
-            // tell our next to update its pointers
+            // tell our next to update its prev2 and next2
             int nextfd = Open_clientfd(next.address, next.port);
             int n2 = sprintf(temp, "UPDATE|prev2:%s:%d:%u", address , port, hash);
             strcat(update, temp);
@@ -62,7 +62,7 @@ void handle_join(char* address, int port,unsigned int hash) {
             Rio_writep(nextfd, update, n2);
             Close(nextfd);
 
-            // tell our prev2 to update its pointers
+            // tell our prev2 to update its next2
             int prev2fd = Open_clientfd(prev2.address, prev2.port);
             n2 = sprintf(update, "UPDATE|next2:%s:%d:%u\r\n", address , port, hash);
             Rio_writep(prev2fd, update, n2);
@@ -79,7 +79,7 @@ void handle_join(char* address, int port,unsigned int hash) {
             n += sprintf(temp, "|prev2:%s:%d:%u\r\n", prev2.address , prev2.port, prev2.hash);
             strcat(request, temp);
 
-            // tell our next to update its pointers
+            // tell our next to update its prev2 and next2
             int nextfd = Open_clientfd(next.address, next.port);
             int n2 = sprintf(temp, "UPDATE|prev2:%s:%d:%u", address , port, hash);
             strcat(update, temp);
@@ -88,7 +88,7 @@ void handle_join(char* address, int port,unsigned int hash) {
             Rio_writep(nextfd, update, n2);
             Close(nextfd);
 
-            // tell our next2 to update its pointers
+            // tell our next2 to update its next and next2
             int next2fd = Open_clientfd(next2.address, next2.port);
             memset(update, 0, 128);
             n2 = 0;
@@ -105,7 +105,7 @@ void handle_join(char* address, int port,unsigned int hash) {
             n += sprintf(temp, "|prev2:%s:%d:%u\r\n", prev2.address , prev2.port, prev2.hash);
             strcat(request, temp);
 
-            // tell our next to update its pointers
+            // tell our next to update its prev2
             int nextfd = Open_clientfd(next.address, next.port);
             int n2 = sprintf(update, "UPDATE|prev2:%s:%d:%u\r\n", address , port, hash);
             Rio_writep(nextfd, update, n2);
@@ -292,7 +292,6 @@ int main(int argc, char *argv[]) {
     struct hostent *hp;
     char *haddrp ;
     while(1) {// listen for chord messages
-        //printf("Listening for chord messages on port: %d\n", listen_port);
         printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n\n", prev2.hash,
                 prev.hash, me.hash, next.hash, next2.hash);
         int clientlen = sizeof(clientaddr);
@@ -305,7 +304,6 @@ int main(int argc, char *argv[]) {
             sizeof(clientaddr.sin_addr.s_addr), AF_INET);
 
         haddrp = inet_ntoa(clientaddr.sin_addr);
-        //printf("Accepted connection from %s:%d\n", haddrp, clientaddr.sin_port);
         handle_connection(connfd);// TODO use detached threads
 
     }
