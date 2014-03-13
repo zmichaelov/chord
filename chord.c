@@ -234,34 +234,37 @@ void join_chord_ring(char* ip, int port){
     size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", me.address, me.port, me.hash);
     Rio_writep(joinfd, request, n);
 }
-
-unsigned int hash_to_int(unsigned char* b){
-    unsigned int h = 0;
-    for (int i = 0; i < 20; i += 4){
-        int x = 0;
-        x = b[i];
-        x = (x << 8) + b[i+1];
-        x = (x << 8) + b[i+2];
-        x = (x << 8) + b[i+3];
-        if (h == 0){
-            h = x;
-        } else {
-            h ^= x;
+void repl () {
+    char command[64] = "";// should be 'quit' or search term
+	while(1) {
+        printf("chord-shell$ ");
+		if(fgets(command, 64, stdin) == NULL || !strcmp(command, "\n")) {
+			if (feof(stdin)) { /* End of file (ctrl-d) */
+				fflush(stdout);
+				printf("\n");
+				exit(EXIT_SUCCESS);
+            }
+			continue; /* NOOP; user entered return or spaces with return */
+		}
+        int n = strcmp(command, "quit\n");
+        if (!n){
+            exit(0);
         }
+        printf("You searched for:%s", command);
     }
-    return h;
 }
 int main(int argc, char *argv[]) {
-    char ip_and_port[21];
     // parse command line options
     if (argc != 3 && argc != 5) {
         printf("Usage: %s listen_address listen_port [join_ip] [join_port]\n", argv[0]);
         exit(1);
     }
 
+    pthread_t tid;
     char* listen_address = argv[1];
     int listen_port = atoi(argv[2]); // listen for chord connections on this port
     // generate our hash
+    char ip_and_port[21];
     size_t n = sprintf(ip_and_port, "%s%d", listen_address, listen_port);
     unsigned char myhash[SHA_DIGEST_LENGTH];
     SHA1(ip_and_port, n, myhash);
@@ -279,18 +282,20 @@ int main(int argc, char *argv[]) {
     prev = me;
     next = me;
     next2 = me;
-
     if (argc == 5) {// join an existing ring
         char* join_ip = argv[3];
         int join_port = atoi(argv[4]);
         join_chord_ring(join_ip, join_port);
-    } else {
     }
 
+    repl();
+
+    // this should be done in threads
     int connfd;
     struct sockaddr_in clientaddr;
     struct hostent *hp;
     char *haddrp ;
+
     while(1) {// listen for chord messages
         printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n\n", prev2.hash,
                 prev.hash, me.hash, next.hash, next2.hash);
