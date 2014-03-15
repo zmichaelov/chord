@@ -51,14 +51,15 @@ int append_update(char* request, const char* ptr, chord_node node){
 // pass request to our next node
 void forward_request (char* request, size_t n){
     int nextfd = Open_clientfd(next.address, next.port);
-    Rio_writep(nextfd, request, n);
+    rio_writep(nextfd, request, n);
     Close(nextfd);
 }
 // determine if we are the correct bucket for this resource
 int found_correct_bucket(unsigned int resource) {
     return (me.hash == next.hash) || // one node ring
            (resource < me.hash && prev.hash < resource) ||// regular case
-           (resource < me.hash && prev.hash > me.hash); // edge case: we are the start of the ring
+           (resource < me.hash && prev.hash > me.hash) || // edge case: we are the start of the ring
+           (resource > prev.hash && prev.hash > me.hash); // edge case: we are the start of the ring
 }
 
 void handle_search(char* search) {
