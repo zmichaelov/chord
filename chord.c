@@ -40,9 +40,13 @@ unsigned int get_hash(char* search) {
     SHA1(search, strlen(search), myhash);
     return hash_to_int(&myhash);
 }
-// tell the chord node defined my old to update
-void send_update(chord_node old, chord_node new){
 
+int append_update(char* request, const char* ptr, chord_node node){
+    size_t n = 0;
+    char temp[128] = "";
+    n += sprintf(temp, "|%s:%s:%d:%u", ptr, node.address , node.port, node.hash);
+    strcat(request, temp);
+    return n;
 }
 // pass request to our next node
 void forward_request (char* request, size_t n){
@@ -54,7 +58,7 @@ void forward_request (char* request, size_t n){
 int found_correct_bucket(unsigned int resource) {
     return (me.hash == next.hash) || // one node ring
            (resource < me.hash && prev.hash < resource) ||// regular case
-           (resource < me.hash && prev.hash > me.hash); // edge case: we are the start of teh ring
+           (resource < me.hash && prev.hash > me.hash); // edge case: we are the start of the ring
 }
 
 void handle_search(char* search) {
@@ -71,9 +75,63 @@ void handle_search(char* search) {
     }
 }
 
+void handle_leave() {
+    char update[MAXBUF] = "UPDATE";
+    size_t n = strlen(update);
+    // Case 1: leaving a 1-node ring
+    if (prev2.hash == prev.hash) {
+        return;
+    // Case 2: leaving a 2-node ring
+    } else if (prev.hash == next.hash){
+        // prev and next should be reset it itself
+        int prevfd = Open_clientfd(prev.address, prev.port);
+        n += append_update(update, "prev", prev);
+        n += append_update(update, "next", next);
+        strcat(update, "\r\n");
+        n += strlen("\r\n");
+//        n += sprintf(temp, "|prev:%s:%d:%u", prev.address , prev.port, prev.hash);
+//        strcat(update, temp);
+//        n += sprintf(temp, "|next:%s:%d:%u\r\n", next.address , next.port, next.hash);
+//        strcat(update, temp);
+        printf("leave request for 2: %s", update);
+        Rio_writep(prevfd, update, n);
+        Close(prevfd);
+
+    // Case 3: leaving a 3-node ring
+    } else if (next.hash == prev2.hash){
+        int nextfd = Open_clientfd(next.address, next.port);
+        n += append_update(update, "prev2", next);
+        n += append_update(update, "prev", prev);
+        n += append_update(update, "next", next);
+        strcat(update, "\r\n");
+//        n += sprintf(update, "UPDATE|prev2:%s:%d:%u\r\n", next.address , next.port, next.hash);
+//        strcat(update, temp);
+//        n += sprintf(update, "|prev:%s:%d:%u\r\n", prev.address , prev.port, prev.hash);
+//        strcat(update, temp);
+//        n += sprintf(update, "|next2:%s:%d:%u\r\n", next.address , next.port, next.hash);
+//        strcat(update, temp);
+        Rio_writep(nextfd, update, n);
+        Close(nextfd);
+
+        n = 0;
+        memset(update, 0, MAXBUF);
+        int prevfd = Open_clientfd(prev.address, prev.port);
+        n += append_update(update, "prev2", prev);
+        n += append_update(update, "next", next);
+        n += append_update(update, "next2", prev);
+        strcat(update, "\r\n");
+        Rio_writep(prevfd, update, n);
+        Close(prevfd);
+    // Case 4: leaving a 4-node or more ring
+    } else {
+
+    }
+
+}
 void handle_join(char* address, int port,unsigned int hash) {
-    if( (me.hash == next.hash) || (hash < me.hash && prev.hash < hash) ||
-        (hash < me.hash && prev.hash > me.hash)) {// found correct position in ring
+    if (found_correct_bucket(hash)) {
+//    if( (me.hash == next.hash) || (hash < me.hash && prev.hash < hash) ||
+//        (hash < me.hash && prev.hash > me.hash)) {// found correct position in ring
         // send necessary pointers to
         int fd = Open_clientfd(address, port);// open connection to ring
         // send bytes request to join
@@ -211,14 +269,6 @@ void handle_join(char* address, int port,unsigned int hash) {
     }
 }
 
-void handle_quit() {
-    // tell our prev2, prev, next, and next2 to update their pointers
-    char update[128];
-    int nextfd = Open_clientfd(next.address, next.port);
-    //int n2 = sprintf(update, "UPDATE|prev2:%s:%d:%u\r\n", address , port, hash);
-    //Rio_writep(nextfd, update, n2);
-    Close(nextfd);
-}
 void process_update (char* request){
     char* save;
     char* name = strtok_r(request, ":", &save);
