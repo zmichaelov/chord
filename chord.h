@@ -5,3 +5,4 @@ typedef struct {
     unsigned int hash;
     //unsigned char hash[SHA_DIGEST_LENGTH];
 } chord_node;
+#define TIMEOUT 5

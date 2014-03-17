@@ -4,18 +4,30 @@
 #include "chord.h"
 #include <openssl/sha.h>
 #include <pthread.h>
-
 chord_node prev2;
 chord_node prev;
 chord_node me;
 chord_node next;
 chord_node next2;
+// our finger tables
+chord_node shortcuts[32];
+int pending = 0;
+int updated_pointers = 0;
+pthread_mutex_t mutex;
+struct timeval t1, t2;
+long int elapsedTime = 0;
+
 char * read_request(int connfd) {
     char* request = Malloc(sizeof(char)*MAXBUF);
     rio_t client;
     Rio_readinitb(&client, connfd);
     Rio_readlineb(&client, request, MAXBUF);
     return request;
+}
+void reinit_keepalive() {
+    pthread_mutex_lock(&mutex);
+    updated_pointers = 1;
+    pthread_mutex_unlock(&mutex);
 }
 
 unsigned int hash_to_int(unsigned char* b){
@@ -270,7 +282,8 @@ void handle_join(char* address, int port,unsigned int hash) {
         prev.port = port;
         prev.hash = hash;
 
-
+        // tell keepalive connections to re-initialize
+        reinit_keepalive();
     } else {
         // forward join request to our successor
         printf("Forwarding Request to %s:%d\n", next.address, next.port);
@@ -298,10 +311,12 @@ void process_update (char* request){
         strcpy(prev.address, ip);
         prev.port = port;
         prev.hash= hash;
+        reinit_keepalive();
     } else if(!strcmp(name, "next")){
         strcpy(next.address, ip);
         next.port = port;
         next.hash= hash;
+        reinit_keepalive();
     } else if(!strcmp(name, "next2")){
         strcpy(next2.address, ip);
         next2.port = port;
@@ -322,7 +337,7 @@ int handle_connection(int connfd) {
         handle_join(ip, port, hash);
     } else if (!strcmp(cmd, "UPDATE")) {
         char* ptr = cmd;
-        char* req = Malloc(sizeof(char)*256);
+        char* req = Malloc(sizeof(char)*MAXBUF);
         while (1) {// parse out individual update requests
             ptr = strtok_r(NULL, "|", &saveptr);// strip out one update request
             if (ptr == NULL){
@@ -333,8 +348,34 @@ int handle_connection(int connfd) {
             process_update(req);
         }
         Free(req);
-    } else if (!strcmp(cmd, "KEEP-ALIVE")){
+    } else if (!strcmp(cmd, "PONG")){
+        // we have received a response
+        pthread_mutex_lock(&mutex);
 
+            gettimeofday(&t2, NULL); // stop timer
+            // compute and print the elapsed time in millisec
+            elapsedTime = (t2.tv_sec - t1.tv_sec);
+            printf("Pong elapsed time: %ld\n", elapsedTime);
+            if (elapsedTime > TIMEOUT ) {
+                printf("Timeout detected!\n");
+                // initiate splicing of nodes
+            }
+            pending = 0; // we have finished processing ping-pong
+
+        pthread_mutex_unlock(&mutex);
+
+
+    } else if (!strcmp(cmd, "PING")){
+        //respond with pong
+        char* ip = strtok_r(NULL, ":", &saveptr);
+        int port = atoi(strtok_r(NULL, "|", &saveptr));
+        int hash = atoi(strtok_r(NULL, "|", &saveptr));
+
+        char request[64] = "";
+        size_t n = sprintf(request, "PONG|%s:%d|%u\r\n", me.address, me.port, me.hash);
+        int returnfd = Open_clientfd(ip, port);
+        rio_writep(returnfd, request, n);
+        Close(returnfd);
     } else if (!strcmp(cmd, "SEARCH")){
         char* query = strtok_r(NULL, ":", &saveptr);
         handle_search(query);
@@ -348,7 +389,7 @@ void join_chord_ring(char* ip, int port){
 
     int joinfd = Open_clientfd(ip, port);// open connection to ring
     // send bytes request to join
-    char request[1024];
+    char request[64];
     // give the ring our ip address, port, and hash
     size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", me.address, me.port, me.hash);
     rio_writep(joinfd, request, n);
@@ -356,9 +397,57 @@ void join_chord_ring(char* ip, int port){
 }
 
 void* keepalive () {
+    pthread_mutex_lock(&mutex);
+    updated_pointers = 0;
+    pthread_mutex_unlock(&mutex);
+    // open connection to prev
+    /*struct timeval tv; tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    //setsockopt(prevfd, SOL_SOCKET, SO_RCVTIMEO, (const void*)&tv, sizeof(tv));*/
+    char request[64] = "";
 
+    size_t n = sprintf(request, "PING|%s:%d|%u\r\n", me.address, me.port, me.hash);
+    while (1) {
+        pthread_mutex_lock(&mutex);
+            //printf("pending = %d\n", pending);
+            if (updated_pointers) {
+                pthread_mutex_unlock(&mutex);
+                break;
+            }
+            if (!pending) {// if not waiting on existing ping, go ahead and issue another
+                sleep(5);
+                pending = 1;
+                int prevfd = open_clientfd(prev.address, prev.port);
+                gettimeofday(&t1, NULL); // start timer
+                rio_writep(prevfd, request, n);
+                Close(prevfd);
+            } else {
+                gettimeofday(&t2, NULL); // stop timer
+                // compute and print the elapsed time in millisec
+                elapsedTime = (t2.tv_sec - t1.tv_sec);
+                if (elapsedTime > TIMEOUT) {
+                    printf("Elapsed time: %ld\n", elapsedTime);
+                    printf("Timeout detected!\n");
+                    // reset
+                    // initiate splicing of nodes
+                    pending = 0; // we have finished processing ping-pong
+                    elapsedTime = 0;
+                }
+
+            }
+        pthread_mutex_unlock(&mutex);
+    }
+    return NULL;
 }
 
+// continuously spawn threads to handle keepalives
+void* keepalive_manager(){
+    while(1){
+        pthread_t tid;
+        Pthread_create(&tid, NULL, keepalive, NULL);
+        Pthread_join(tid, NULL);
+    }
+}
 void repl () {
     char command[64] = "";// should be 'quit' or search term
     while(1) {
@@ -380,6 +469,8 @@ void repl () {
         //printf("You searched for:%s", command);
     }
 }
+
+
 void* connections(void* listen_port) {
     int listenfd = Open_listenfd(*(int*)listen_port);
     int optval = 1;
@@ -387,11 +478,11 @@ void* connections(void* listen_port) {
     // this should be done in threads
     int connfd;
     struct sockaddr_in clientaddr;
+    int clientlen = sizeof(clientaddr);
 
     while(1) {// listen for chord messages
         printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n", prev2.hash,
                 prev.hash, me.hash, next.hash, next2.hash);
-        int clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
         if (connfd <= 2) {
             continue;
@@ -407,6 +498,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
+    pthread_mutex_init(&mutex, NULL);
     char* listen_address = argv[1];
     int listen_port = atoi(argv[2]); // listen for chord connections on this port
     // generate our hash
@@ -436,7 +528,7 @@ int main(int argc, char *argv[]) {
 
     pthread_t tid2;
     /* spawn a thread to process the new connection */
-    Pthread_create(&tid2, NULL, keepalive, NULL);
+    Pthread_create(&tid2, NULL, keepalive_manager, NULL);
     Pthread_detach(tid2);
 
     repl();
