@@ -64,7 +64,7 @@ int append_update(char* request, const char* ptr, chord_node node){
 void forward_request (char* request, size_t n){
     int nextfd = Open_clientfd(next.address, next.port);
     rio_writep(nextfd, request, n);
-    Close(nextfd);
+    close(nextfd);
 }
 // determine if we are the correct bucket for this resource
 int found_correct_bucket(unsigned int resource) {
@@ -102,7 +102,7 @@ void handle_leave() {
         strcat(update, "\r\n");
         printf("leave request for 2: %s", update);
         rio_writep(prevfd, update, strlen(update));
-        Close(prevfd);
+        close(prevfd);
 
     // Case 3: leaving a 3-node ring
     } else if (next.hash == prev2.hash){
@@ -112,7 +112,7 @@ void handle_leave() {
         append_update(update, "next2", next);
         strcat(update, "\r\n");
         rio_writep(nextfd, update, strlen(update));
-        Close(nextfd);
+        close(nextfd);
 
         memset(update, 0, MAXBUF);
         strcat(update, "UPDATE");
@@ -122,7 +122,7 @@ void handle_leave() {
         append_update(update, "next2", prev);
         strcat(update, "\r\n");
         rio_writep(prevfd, update, strlen(update));
-        Close(prevfd);
+        close(prevfd);
     // Case 4: leaving a 4-node or more ring
     } else {
         int nextfd = open_clientfd(next.address, next.port);
@@ -130,7 +130,7 @@ void handle_leave() {
         append_update(update, "prev", prev);
         strcat(update, "\r\n");
         rio_writep(nextfd, update, strlen(update));
-        Close(nextfd);
+        close(nextfd);
 
         memset(update, 0, MAXBUF);
         strcat(update, "UPDATE");
@@ -139,7 +139,7 @@ void handle_leave() {
         append_update(update, "next2", next2);
         strcat(update, "\r\n");
         rio_writep(prevfd, update, strlen(update));
-        Close(prevfd);
+        close(prevfd);
 
         memset(update, 0, MAXBUF);
         strcat(update, "UPDATE");
@@ -147,7 +147,7 @@ void handle_leave() {
         append_update(update, "next2", next);
         strcat(update, "\r\n");
         rio_writep(prev2fd, update, strlen(update));
-        Close(prev2fd);
+        close(prev2fd);
 
         memset(update, 0, MAXBUF);
         strcat(update, "UPDATE");
@@ -155,7 +155,7 @@ void handle_leave() {
         append_update(update, "prev2", prev);
         strcat(update, "\r\n");
         rio_writep(next2fd, update, strlen(update));
-        Close(next2fd);
+        close(next2fd);
     }
 
 }
@@ -193,13 +193,13 @@ void handle_join(char* address, int port,unsigned int hash) {
             n2 += sprintf(temp, "|next2:%s:%d:%u\r\n", me.address , me.port, me.hash);
             strcat(update, temp);
             rio_writep(nextfd, update, n2);
-            Close(nextfd);
+            close(nextfd);
 
             // tell our prev2 to update its next2
             int prev2fd = Open_clientfd(prev2.address, prev2.port);
             n2 = sprintf(update, "UPDATE|next2:%s:%d:%u\r\n", address , port, hash);
             rio_writep(prev2fd, update, n2);
-            Close(prev2fd);
+            close(prev2fd);
 
             // our next2 points to the new node
             strcpy(next2.address, address);
@@ -219,7 +219,7 @@ void handle_join(char* address, int port,unsigned int hash) {
             n2 += sprintf(temp, "|next2:%s:%d:%u\r\n", address , port, hash);
             strcat(update, temp);
             rio_writep(nextfd, update, n2);
-            Close(nextfd);
+            close(nextfd);
 
             // tell our next2 to update its next and next2
             int next2fd = Open_clientfd(next2.address, next2.port);
@@ -230,7 +230,7 @@ void handle_join(char* address, int port,unsigned int hash) {
             n2 += sprintf(temp, "|next2:%s:%d:%u\r\n", me.address , me.port, me.hash);
             strcat(update, temp);
             rio_writep(next2fd, update, n2);
-            Close(next2fd);
+            close(next2fd);
         // Case 4: joining a 4-node or more ring
         } else {
             n += sprintf(temp, "|next2:%s:%d:%u", next.address , next.port, next.hash);
@@ -242,14 +242,14 @@ void handle_join(char* address, int port,unsigned int hash) {
             int nextfd = Open_clientfd(next.address, next.port);
             int n2 = sprintf(update, "UPDATE|prev2:%s:%d:%u\r\n", address , port, hash);
             rio_writep(nextfd, update, n2);
-            Close(nextfd);
+            close(nextfd);
 
             // tell our prev to update its next2
             int prevfd = Open_clientfd(prev.address, prev.port);
             memset(update, 0, 128);
             n2 = sprintf(update, "UPDATE|next2:%s:%d:%u\r\n", me.address , me.port, me.hash);
             rio_writep(prevfd, update, n2);
-            Close(prevfd);
+            close(prevfd);
 
             // tell our prev2 to update its next2
             int next2fd = Open_clientfd(prev2.address, prev2.port);
@@ -258,18 +258,18 @@ void handle_join(char* address, int port,unsigned int hash) {
             n2 += sprintf(temp, "UPDATE|next2:%s:%d:%u\r\n", address , port, hash);
             strcat(update, temp);
             rio_writep(next2fd, update, n2);
-            Close(next2fd);
+            close(next2fd);
         }
         printf("Update to send to new node: %s\n", request);
         int fd = open_clientfd(address, port);// open connection to ring
         rio_writep(fd, request, n);// send update request to joining node
-        Close(fd);
+        close(fd);
 
         // tell predecessor to update its next pointer
         fd = Open_clientfd(prev.address, prev.port);// open connection to ring
         n = sprintf(request, "UPDATE|next:%s:%d:%u\r\n",address , port, hash);
         rio_writep(fd, request, n);// send update request to joining node
-        Close(fd);
+        close(fd);
 
 
         // update our pointers
@@ -293,7 +293,7 @@ void handle_join(char* address, int port,unsigned int hash) {
         // give the ring our ip address, port, and hash
         size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", address, port, hash);
         rio_writep(nextfd, request, n);
-        Close(nextfd);
+        close(nextfd);
     }
 }
 
@@ -375,7 +375,7 @@ int handle_connection(int connfd) {
         size_t n = sprintf(request, "PONG|%s:%d|%u\r\n", me.address, me.port, me.hash);
         int returnfd = Open_clientfd(ip, port);
         rio_writep(returnfd, request, n);
-        Close(returnfd);
+        close(returnfd);
     } else if (!strcmp(cmd, "SEARCH")){
         char* query = strtok_r(NULL, ":", &saveptr);
         handle_search(query);
@@ -393,7 +393,7 @@ void join_chord_ring(char* ip, int port){
     // give the ring our ip address, port, and hash
     size_t n = sprintf(request, "JOIN|%s:%d|%u\r\n", me.address, me.port, me.hash);
     rio_writep(joinfd, request, n);
-    Close(joinfd);
+    close(joinfd);
 }
 
 void* keepalive () {
@@ -420,7 +420,7 @@ void* keepalive () {
                 int prevfd = open_clientfd(prev.address, prev.port);
                 gettimeofday(&t1, NULL); // start timer
                 rio_writep(prevfd, request, n);
-                Close(prevfd);
+                close(prevfd);
             } else {
                 gettimeofday(&t2, NULL); // stop timer
                 // compute and print the elapsed time in millisec
