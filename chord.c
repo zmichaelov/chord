@@ -16,7 +16,11 @@ int updated_pointers = 0;
 pthread_mutex_t mutex;
 struct timeval t1, t2;
 long int elapsedTime = 0;
+void log_pointers(){
+    printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n", prev2.hash,
+            prev.hash, me.hash, next.hash, next2.hash);
 
+}
 char * read_request(int connfd) {
     char* request = Malloc(sizeof(char)*MAXBUF);
     rio_t client;
@@ -262,7 +266,10 @@ void handle_join(char* address, int port,unsigned int hash) {
         }
         printf("Update to send to new node: %s\n", request);
         int fd = open_clientfd(address, port);// open connection to ring
-        rio_writep(fd, request, n);// send update request to joining node
+        int r;
+        while((r = rio_writep(fd, request, n)) < 0){
+            printf("write value: %d\n", r);
+        };// send update request to joining node
         close(fd);
 
         // tell predecessor to update its next pointer
@@ -283,6 +290,7 @@ void handle_join(char* address, int port,unsigned int hash) {
         prev.hash = hash;
 
         // tell keepalive connections to re-initialize
+        log_pointers();
         reinit_keepalive();
     } else {
         // forward join request to our successor
@@ -297,7 +305,7 @@ void handle_join(char* address, int port,unsigned int hash) {
     }
 }
 
-void rpc() { // for node C
+void rpc() { // for node after the one that died
     // update ourselves
     char update[MAXBUF] = "UPDATE";
     strcpy(prev.address, prev2.address);
@@ -317,13 +325,13 @@ void rpc() { // for node C
     strcat(update, "\r\n");
     rio_writep(next2fd, update, strlen(update));
     close(next2fd);
-
+    reinit_keepalive();
 }
 void process_update (char* request){
-   // if(!strcmp(request, "RPC")) {
-   //     rpc();
-   //     return;
-   // }
+    if(!strcmp(request, "RPC\r\n")) {
+        rpc();
+        return;
+    }
     char* save;
     char* name = strtok_r(request, ":", &save);
     char* ip = strtok_r(NULL, ":", &save);
@@ -353,7 +361,7 @@ void process_update (char* request){
 int handle_connection(int connfd) {
 
     char* request = read_request(connfd);
-    printf("request: %s\n", request);
+    //printf("request: %s\n", request);
     char* saveptr;
     char* cmd = strtok_r(request, "|", &saveptr);
     if(!strcmp(cmd, "JOIN")) {// a new node wants to join the ring
@@ -370,10 +378,11 @@ int handle_connection(int connfd) {
                 break;
             }
             strcpy(req, ptr);
-            //printf("request: %s\n", req);
+            printf("request: %s\n", req);
             process_update(req);
         }
         Free(req);
+        log_pointers();
     } else if (!strcmp(cmd, "PONG")){
         // handle response for prev
         pthread_mutex_lock(&mutex);
@@ -400,16 +409,12 @@ int handle_connection(int connfd) {
         int returnfd = open_clientfd(ip, port);
         rio_writep(returnfd, request, n);
         close(returnfd);
-    } else if (!strcmp(cmd, "RPC")){
-        rpc();
     } else if (!strcmp(cmd, "SEARCH")){
         char* query = strtok_r(NULL, ":", &saveptr);
         handle_search(query);
     }
     // free dynamic memory
     Free(request);
-    printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n", prev2.hash,
-            prev.hash, me.hash, next.hash, next2.hash);
     return 0;
 }
 // join an existing chord ring
@@ -427,6 +432,8 @@ void handle_timeout(){// what to do when next becomes unresponsive
     char update[MAXBUF] = "UPDATE";
     // Case 1: leaving a 1-node ring
     if (prev2.hash == prev.hash) {
+    // Case 2: leaving a 2-node ring
+    } else if (prev.hash == next.hash){
         strcpy(prev.address, me.address);
         prev.port = me.port;
         prev.hash = me.hash;
@@ -434,14 +441,16 @@ void handle_timeout(){// what to do when next becomes unresponsive
         strcpy(next.address, me.address);
         next.port = me.port;
         next.hash = me.hash;
-        return;
-    // Case 2: leaving a 2-node ring
-    } else if (prev.hash == next.hash){
-
     // Case 3: leaving a 3-node ring
     } else if (next.hash == prev2.hash){
     // Case 4: leaving a 4-node or more ring
     } else {
+        // put the rpc call first
+        strcat(update, "|RPC\r\n"); // send RPC call to our next2
+        int next2fd = open_clientfd(next2.address, next2.port);
+        rio_writep(next2fd, update, strlen(update));
+        close(next2fd);
+
         strcpy(next.address, next2.address);
         next.port = next2.port;
         next.hash = next2.hash;
@@ -456,13 +465,14 @@ void handle_timeout(){// what to do when next becomes unresponsive
 
         memset(update, 0, MAXBUF);
         strcat(update, "UPDATE");
-        int next2fd = open_clientfd(next2.address, next2.port);
+        next2fd = open_clientfd(next2.address, next2.port);
         append_update(update, "prev2", prev);
-        strcat(update, "|RPC\r\n"); // send RPC call to our next2
         rio_writep(next2fd, update, strlen(update));
         close(next2fd);
     }
 
+    log_pointers();
+    reinit_keepalive();
 }
 
 void* keepalive () {
@@ -473,13 +483,12 @@ void* keepalive () {
 
     size_t n = sprintf(request, "PING|%s:%d|%u\r\n", me.address, me.port, me.hash);
     while (1) {
+        sleep(5);
         pthread_mutex_lock(&mutex);
-            //printf("pending = %d\n", pending);
             if (updated_pointers) {
                 pthread_mutex_unlock(&mutex);
                 break;
             }
-            sleep(5);
             if (!pending) {// if not waiting on existing ping, go ahead and issue another
                 pending = 1;
                 int nextfd = open_clientfd(next.address, next.port);
@@ -491,7 +500,7 @@ void* keepalive () {
                 // compute and print the elapsed time in millisec
                 elapsedTime = (t2.tv_sec - t1.tv_sec);
                 if (elapsedTime > TIMEOUT) {
-                    printf("prev elapsed time: %ld\n", elapsedTime);
+                    printf("elapsed time: %ld\n", elapsedTime);
                     printf("Timeout detected on our next\n");
                     // reset
                     // initiate splicing of nodes
@@ -585,6 +594,8 @@ int main(int argc, char *argv[]) {
         char* join_ip = argv[3];
         int join_port = atoi(argv[4]);
         join_chord_ring(join_ip, join_port);
+    } else{
+        log_pointers();
     }
 
     pthread_t tid;
