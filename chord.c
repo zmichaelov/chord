@@ -324,6 +324,55 @@ void rpc() { // for node after the one that died
     close(next2fd);
     reinit_keepalive();
 }
+void handle_timeout(){// what to do when next becomes unresponsive
+    char update[MAXBUF] = "UPDATE";
+    // Case 1: leaving a 1-node ring
+    if (prev2.hash == prev.hash) {
+    // Case 2: leaving a 2-node ring
+    } else if (prev.hash == next.hash){
+        strcpy(prev.address, me.address);
+        prev.port = me.port;
+        prev.hash = me.hash;
+
+        strcpy(next.address, me.address);
+        next.port = me.port;
+        next.hash = me.hash;
+    // Case 3: leaving a 3-node ring
+    } else if (next.hash == prev2.hash){
+    // Case 4: leaving a 4-node or more ring
+    } else {
+        // put the rpc call first
+        strcat(update, "|RPC\r\n"); // send RPC call to our next2
+        int next2fd = open_clientfd(next2.address, next2.port);
+        rio_writep(next2fd, update, strlen(update));
+        close(next2fd);
+
+        //remaingin updates
+        strcpy(next.address, next2.address);
+        next.port = next2.port;
+        next.hash = next2.hash;
+
+        memset(update, 0, MAXBUF);
+        strcat(update, "UPDATE");
+        int prevfd = open_clientfd(prev.address, prev.port);
+        append_update(update, "next2", next2);
+        strcat(update, "\r\n");
+        rio_writep(prevfd, update, strlen(update));
+        close(prevfd);
+
+        memset(update, 0, MAXBUF);
+        strcat(update, "UPDATE");
+        next2fd = open_clientfd(next2.address, next2.port);
+        append_update(update, "prev", me);
+        append_update(update, "prev2", prev);
+        rio_writep(next2fd, update, strlen(update));
+        close(next2fd);
+    }
+
+    log_pointers();
+    reinit_keepalive();
+}
+
 void process_update (char* request){
     if(!strcmp(request, "RPC\r\n")) {
         rpc();
@@ -389,7 +438,9 @@ int handle_connection(int connfd) {
             if (elapsedTime > TIMEOUT ) {
                 printf("next pong elapsed time: %ld\n", elapsedTime);
                 printf("Timeout detected on our successor!\n");
-                // initiate splicing of nodes
+
+                // initiate splicing of node
+                handle_timeout();
             }
             pending = 0; // we have finished processing ping-pong
             elapsedTime = 0;
@@ -425,58 +476,6 @@ void join_chord_ring(char* ip, int port){
     rio_writep(joinfd, request, n);
     close(joinfd);
 }
-void handle_timeout(){// what to do when next becomes unresponsive
-    char update[MAXBUF] = "UPDATE";
-    // Case 1: leaving a 1-node ring
-    if (prev2.hash == prev.hash) {
-    // Case 2: leaving a 2-node ring
-    } else if (prev.hash == next.hash){
-        strcpy(prev.address, me.address);
-        prev.port = me.port;
-        prev.hash = me.hash;
-
-        strcpy(next.address, me.address);
-        next.port = me.port;
-        next.hash = me.hash;
-    // Case 3: leaving a 3-node ring
-    } else if (next.hash == prev2.hash){
-    // Case 4: leaving a 4-node or more ring
-    } else {
-        // put the rpc call first
-        strcat(update, "|RPC\r\n"); // send RPC call to our next2
-        int next2fd = open_clientfd(next2.address, next2.port);
-        rio_writep(next2fd, update, strlen(update));
-        close(next2fd);
-
-        //remaingin updates
-        strcpy(next.address, next2.address);
-        next.port = next2.port;
-        next.hash = next2.hash;
-
-        memset(update, 0, MAXBUF);
-        strcat(update, "UPDATE");
-
-
-        memset(update, 0, MAXBUF);
-        strcat(update, "UPDATE");
-        int prevfd = open_clientfd(prev.address, prev.port);
-        append_update(update, "next2", next2);
-        strcat(update, "\r\n");
-        rio_writep(prevfd, update, strlen(update));
-        close(prevfd);
-
-        memset(update, 0, MAXBUF);
-        strcat(update, "UPDATE");
-        next2fd = open_clientfd(next2.address, next2.port);
-        append_update(update, "prev", me);
-        append_update(update, "prev2", prev);
-        rio_writep(next2fd, update, strlen(update));
-        close(next2fd);
-    }
-
-    log_pointers();
-    reinit_keepalive();
-}
 
 void* keepalive () {
     pthread_mutex_lock(&mutex);
@@ -503,7 +502,6 @@ void* keepalive () {
                 // compute and print the elapsed time in millisec
                 elapsedTime = (t2.tv_sec - t1.tv_sec);
                 if (elapsedTime > TIMEOUT) {
-                    printf("elapsed time: %ld\n", elapsedTime);
                     printf("Timeout detected on our next\n");
                     // reset
                     // initiate splicing of nodes
