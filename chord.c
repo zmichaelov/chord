@@ -370,7 +370,7 @@ void handle_timeout(){// what to do when next becomes unresponsive
     }
 
     log_pointers();
-    reinit_keepalive();
+    //reinit_keepalive();
 }
 
 void process_update (char* request){
@@ -402,7 +402,6 @@ void process_update (char* request){
         next2.port = port;
         next2.hash= hash;
     }
-
 }
 int handle_connection(int connfd) {
 
@@ -436,7 +435,6 @@ int handle_connection(int connfd) {
             gettimeofday(&t2, NULL); // stop timer
             elapsedTime = (t2.tv_sec - t1.tv_sec);
             if (elapsedTime > TIMEOUT ) {
-                printf("next pong elapsed time: %ld\n", elapsedTime);
                 printf("Timeout detected on our successor!\n");
 
                 // initiate splicing of node
@@ -482,7 +480,7 @@ void* keepalive () {
     updated_pointers = 0;
     pthread_mutex_unlock(&mutex);
     char request[64] = "";
-
+    printf("Keep-Alive reinitialized\n");
     size_t n = sprintf(request, "PING|%s:%d|%u\r\n", me.address, me.port, me.hash);
     while (1) {
         sleep(5);
@@ -508,6 +506,8 @@ void* keepalive () {
                     handle_timeout();
                     pending = 0; // we have finished processing ping-pong
                     elapsedTime = 0;
+                    pthread_mutex_unlock(&mutex);
+                    break;
                 }
 
             }
@@ -522,7 +522,9 @@ void* keepalive_manager(){
         pthread_t tid;
         Pthread_create(&tid, NULL, keepalive, NULL);
         Pthread_join(tid, NULL);
+        puts("Keep-Alive thread joined");
     }
+    puts("Keep-Alive Manager done\n");
 }
 void repl () {
     char command[64] = "";// should be 'quit' or search term
