@@ -308,15 +308,12 @@ void handle_join(char* address, int port,unsigned int hash) {
 void rpc() { // for node after the one that died
     // update ourselves
     char update[MAXBUF] = "UPDATE";
-    strcpy(prev.address, prev2.address);
-    prev.port = prev2.port;
-    prev.hash = prev2.hash;
 
-    int prevfd = open_clientfd(prev2.address, prev2.port);
+    int prev2fd = open_clientfd(prev2.address, prev2.port);
     append_update(update, "next2", next);
     strcat(update, "\r\n");
-    rio_writep(prevfd, update, strlen(update));
-    close(prevfd);
+    rio_writep(prev2fd, update, strlen(update));
+    close(prev2fd);
 
     memset(update, 0, MAXBUF);
     strcat(update, "UPDATE");
@@ -451,9 +448,14 @@ void handle_timeout(){// what to do when next becomes unresponsive
         rio_writep(next2fd, update, strlen(update));
         close(next2fd);
 
+        //remaingin updates
         strcpy(next.address, next2.address);
         next.port = next2.port;
         next.hash = next2.hash;
+
+        memset(update, 0, MAXBUF);
+        strcat(update, "UPDATE");
+
 
         memset(update, 0, MAXBUF);
         strcat(update, "UPDATE");
@@ -466,6 +468,7 @@ void handle_timeout(){// what to do when next becomes unresponsive
         memset(update, 0, MAXBUF);
         strcat(update, "UPDATE");
         next2fd = open_clientfd(next2.address, next2.port);
+        append_update(update, "prev", me);
         append_update(update, "prev2", prev);
         rio_writep(next2fd, update, strlen(update));
         close(next2fd);
