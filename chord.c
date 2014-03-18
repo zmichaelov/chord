@@ -339,6 +339,28 @@ void handle_timeout(){// what to do when next becomes unresponsive
         next.hash = me.hash;
     // Case 3: leaving a 3-node ring
     } else if (next.hash == prev2.hash){
+
+        strcpy(prev2.address, me.address);
+        prev2.port = me.port;
+        prev2.hash = me.hash;
+
+        strcpy(next.address, next2.address);
+        next.port = next2.port;
+        next.hash = next2.hash;
+
+        strcpy(next2.address, me.address);
+        next2.port = me.port;
+        next2.hash = me.hash;
+
+
+        int prevfd = open_clientfd(prev.address, prev.port);
+        append_update(update, "prev2", prev);
+        append_update(update, "prev", me);
+        append_update(update, "next2", prev);
+        strcat(update, "\r\n");
+        rio_writep(prevfd, update, strlen(update));
+        close(prevfd);
+
     // Case 4: leaving a 4-node or more ring
     } else {
         // put the rpc call first
