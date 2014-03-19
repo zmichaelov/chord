@@ -16,6 +16,7 @@ int updated_pointers = 0;
 pthread_mutex_t mutex;
 struct timeval t1, t2;
 long int elapsedTime = 0;
+
 void log_pointers(){
     printf("prev2: %u\nprev: %u\nme: %u\nnext: %u\nnext2: %u\n\n", prev2.hash,
             prev.hash, me.hash, next.hash, next2.hash);
@@ -78,14 +79,21 @@ int found_correct_bucket(unsigned int resource) {
            (resource > prev.hash && prev.hash > me.hash); // edge case: we are the start of the ring
 }
 
-void handle_search(char* search) {
+void handle_search(char* address, int port, char* search) {
     unsigned int hash = get_hash(search);
     printf("Hash for %s = %u\n",search, hash);
     if (found_correct_bucket(hash)) {// found correct position in ring
-        printf("Found correct bucket for search term!\n");
+        //printf("Found correct bucket for search term: %s\n", search);
+        char* request = Malloc(sizeof(char)*64);
+        size_t n = sprintf(request, "FOUND|%s:%u\r\n",search, me.hash);
+        printf("address: %s, port: %d\n", address, port);
+        int foundfd = open_clientfd(address, port);
+        rio_writep(foundfd, request, n);
+        Free(request);
+        close(foundfd);
     } else {
         char* request = Malloc(sizeof(char)*64);
-        size_t n = sprintf(request, "SEARCH|%s\r\n", search);
+        size_t n = sprintf(request, "SEARCH|%s:%d:%s\r\n",search, port, address);
         forward_request(request, n);
         Free(request);
         printf("Forwarding Search Request to %s:%d\n", next.address, next.port);
@@ -477,9 +485,15 @@ int handle_connection(int connfd) {
         int returnfd = open_clientfd(ip, port);
         rio_writep(returnfd, request, n);
         close(returnfd);
-    } else if (!strcmp(cmd, "SEARCH")){
+    } else if (!strcmp(cmd, "FOUND")){// FOUND|query:hash\r\n
         char* query = strtok_r(NULL, ":", &saveptr);
-        handle_search(query);
+        int hash = atoi(strtok_r(NULL, ":", &saveptr));
+        printf("Found %s at node %u\n", query, hash);
+    } else if (!strcmp(cmd, "SEARCH")){// SEARCH|address:port:query\r\n
+        char* query = strtok_r(NULL, ":", &saveptr);
+        int port = atoi(strtok_r(NULL, ":", &saveptr));
+        char* ip = strtok_r(NULL, ":", &saveptr);
+        handle_search(ip, port, query);
     }
     // free dynamic memory
     Free(request);
@@ -565,8 +579,11 @@ void repl () {
             handle_leave();
             exit(0);
         }
-        handle_search(command);
-        //printf("You searched for:%s", command);
+        int len = strlen(command);
+        if( command[len-1] == '\n' ) {
+            command[len-1] = 0;
+        }
+        handle_search(me.address, me.port, command);
     }
 }
 

@@ -46,4 +46,8 @@ The node will also reset its Keep-Alive thread when pointers are updated:
 Keep-Alive thread joined
 Keep-Alive reinitialized
 
-
+For searches, the chord node that found the query will contact the origin of the search:
+chord-shell > quiet
+Hash for quiet = 3792077081
+Forwarding Search Request to 127.0.0.1:8082
+chord-shell > Found quiet at node 2711054561
