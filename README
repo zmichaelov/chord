@@ -1,0 +1,49 @@
+Zach Michaelov (zgm3)
+
+USAGE
+To start a chord program, invoke the executable as follows:
+./chord listen_address listen_port [join_ip] [join_port]
+
+listen_address and listen_port is IPv4 address and port the node will listen for
+chord messages on.
+
+join_ip and join_port is the address of a node within a chord ring we want to join
+
+
+after started, each chord node runs a terminal prompt for performing searches. e.g.
+
+chord-shell >
+
+to search, type your query and hit Enter
+to voluntarily leave the chord ring, type 'quit'
+
+if you see the shell prompt obfuscated by log messages, just hit Enter to bring it back. e.g:
+next2: 3175996535
+
+chord-shell > Keep-Alive reinitialized
+
+chord-shell >
+
+CONSOLE MESSAGES
+each node logs its current pointers to the console like so:
+prev2: 2711054561
+prev: 3175996535
+me: 2711054561
+next: 3175996535
+next2: 2711054561
+
+the number is the hash position of the node in the ring
+this information is printed any time a node updates its pointers
+
+each node also logs the requests it gets from other nodes e.g.
+request: next:127.0.0.1:8081:3175996535
+request: prev:127.0.0.1:8081:3175996535
+
+this is telling the receiving node to update its next and prev pointers to be the node with denoted by
+the following ip address, port, and hash
+
+The node will also reset its Keep-Alive thread when pointers are updated:
+Keep-Alive thread joined
+Keep-Alive reinitialized
+
+
